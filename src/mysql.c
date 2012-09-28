@@ -1,31 +1,31 @@
-/**
- * collectd - src/mysql.c
- * Copyright (C) 2006-2010  Florian octo Forster
- * Copyright (C) 2008       Mirko Buffoni
- * Copyright (C) 2009       Doug MacEachern
- * Copyright (C) 2009       Sebastian tokkee Harl
- * Copyright (C) 2009       Rodolphe Quiédeville
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; only version 2 of the License is applicable.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
- *
- * Authors:
- *   Florian octo Forster <octo at collectd.org>
- *   Mirko Buffoni <briareos at eswat.org>
- *   Doug MacEachern <dougm at hyperic.com>
- *   Sebastian tokkee Harl <sh at tokkee.org>
- *   Rodolphe Quiédeville <rquiedeville at bearstech.com>
- *   Shawn Sterling <shawn at systemtemplar.org>
+    /**
+     * collectd - src/mysql.c
+     * Copyright (C) 2006-2010  Florian octo Forster
+     * Copyright (C) 2008       Mirko Buffoni
+     * Copyright (C) 2009       Doug MacEachern
+     * Copyright (C) 2009       Sebastian tokkee Harl
+     * Copyright (C) 2009       Rodolphe Quiédeville
+     *
+     * This program is free software; you can redistribute it and/or modify it
+     * under the terms of the GNU General Public License as published by the
+     * Free Software Foundation; only version 2 of the License is applicable.
+     *
+     * This program is distributed in the hope that it will be useful, but
+     * WITHOUT ANY WARRANTY; without even the implied warranty of
+     * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+     * General Public License for more details.
+     *
+     * You should have received a copy of the GNU General Public License along
+     * with this program; if not, write to the Free Software Foundation, Inc.,
+     * 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+     *
+     * Authors:
+     *   Florian octo Forster <octo at collectd.org>
+     *   Mirko Buffoni <briareos at eswat.org>
+     *   Doug MacEachern <dougm at hyperic.com>
+     *   Sebastian tokkee Harl <sh at tokkee.org>
+     *   Rodolphe Quiédeville <rquiedeville at bearstech.com>
+     *   Shawn Sterling <shawn at systemtemplar.org>
  **/
 
 #include "collectd.h"
@@ -54,7 +54,7 @@ struct mysql_database_s /* {{{ */
 
 	_Bool master_stats;
 	_Bool slave_stats;
-    _Bool innodb_stats;
+    _Bool innodb_engine_stats;
 
 	_Bool slave_notif;
 	_Bool slave_io_running;
@@ -160,6 +160,7 @@ static int mysql_config_database (oconfig_item_t *ci) /* {{{ */
         db->slow_query_stats    = 0;
         db->table_lock_stats    = 0;
         db->tmp_table_stats     = 0;
+        db->innodb_engine_stats = 0;
 
 	status = cf_util_get_string (ci, &db->instance);
 	if (status != 0)
@@ -225,8 +226,8 @@ static int mysql_config_database (oconfig_item_t *ci) /* {{{ */
 			status = cf_util_get_boolean (child, &db->table_lock_stats);
 		else if (strcasecmp ("TmpTableStats", child->key) == 0)
 			status = cf_util_get_boolean (child, &db->tmp_table_stats);
-        else if (strcasecmp ("InnoDBStats", child->key) == 0)
-            status = cf_util_get_boolean (child, &db->innodb_stats);
+        else if (strcasecmp ("InnodbEngineStats", child->key) == 0)
+            status = cf_util_get_boolean (child, &db->innodb_engine_stats);
 		else
 		{
 			WARNING ("mysql plugin: Option `%s' not allowed here.", child->key);
@@ -648,7 +649,7 @@ static int mysql_read_slave_stats (mysql_database_t *db, MYSQL *con)
 	return (0);
 } /* mysql_read_slave_stats */
 
-static int mysql_innodb_stats (mysql_database_t *db, MYSQL *con)
+static int mysql_innodb_engine_stats (mysql_database_t *db, MYSQL *con)
 {
     MYSQL_RES *res;
     MYSQL_ROW  row;
@@ -792,7 +793,7 @@ static int mysql_innodb_stats (mysql_database_t *db, MYSQL *con)
     mysql_free_result (res);
 
     return (0);
-} /* mysql_innodb_stats */
+} /* mysql_innodb_engine_stats */
 
 static int mysql_read (user_data_t *ud)
 {
@@ -1115,8 +1116,8 @@ static int mysql_read (user_data_t *ud)
 	if ((db->slave_stats) || (db->slave_notif))
 		mysql_read_slave_stats (db, con);
 
-    if (db->innodb_stats)
-        mysql_innodb_stats (db, con);
+    if (db->innodb_engine_stats)
+        mysql_innodb_engine_stats (db, con);
 
 	return (0);
 } /* int mysql_read */
