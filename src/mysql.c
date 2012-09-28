@@ -31,6 +31,7 @@
 #include "common.h"
 #include "plugin.h"
 #include "configfile.h"
+#include "string.h"
 
 #ifdef HAVE_MYSQL_H
 #include <mysql.h>
@@ -52,6 +53,7 @@ struct mysql_database_s /* {{{ */
 
 	_Bool master_stats;
 	_Bool slave_stats;
+    _Bool innodb_stats;
 
 	_Bool slave_notif;
 	_Bool slave_io_running;
@@ -169,6 +171,8 @@ static int mysql_config_database (oconfig_item_t *ci) /* {{{ */
 			status = cf_util_get_boolean (child, &db->slave_stats);
 		else if (strcasecmp ("SlaveNotifications", child->key) == 0)
 			status = cf_util_get_boolean (child, &db->slave_notif);
+        else if (strcasecmp ("InnoDBStats", child->key) == 0)
+            status = cf_util_get_boolean (child, &db->innodb_stats);
 		else
 		{
 			WARNING ("mysql plugin: Option `%s' not allowed here.", child->key);
@@ -383,6 +387,48 @@ static MYSQL_RES *exec_query (MYSQL *con, const char *query)
 	return (res);
 } /* exec_query */
 
+static int split_row (char *string, char **lines, size_t size)
+{
+        int i;
+        char *ptr;
+        char *saveptr;
+
+        i = 0;
+        ptr = string;
+        saveptr = NULL;
+        while ((lines[i] = strtok_r (ptr, "\n", &saveptr)) != NULL)
+        {
+                ptr = NULL;
+                i++;
+                if (i >= size)
+                        break;
+        }
+
+        return i;  
+} /* split_row */
+
+static int split_line (char *string, char **fields, size_t size)
+{
+        size_t i;
+        char *ptr;
+        char *saveptr;
+
+        i = 0;
+        ptr = string;
+        saveptr = NULL;
+        while ((fields[i] = strtok_r (ptr, ", ", &saveptr)) != NULL)
+        {
+                ptr = NULL;
+                i++;
+
+                if (i >= size)
+                        break;
+        }
+
+        return i;
+} /* split_line */
+ 
+
 static int mysql_read_master_stats (mysql_database_t *db, MYSQL *con)
 {
 	MYSQL_RES *res;
@@ -548,6 +594,152 @@ static int mysql_read_slave_stats (mysql_database_t *db, MYSQL *con)
 	return (0);
 } /* mysql_read_slave_stats */
 
+static int mysql_innodb_stats (mysql_database_t *db, MYSQL *con)
+{
+    MYSQL_RES *res;
+    MYSQL_ROW  row;
+
+    char *query, *lines[150], *fields[12];
+    int   field_num, numlines, numfields, i, txn_cnt = 0, unpurge_cnt = 0;
+
+    query = "SHOW /*!50000 ENGINE*/ INNODB STATUS";
+
+    res = exec_query (con, query);
+    if (res == NULL)
+        return (-1);
+
+    row = mysql_fetch_row (res);
+    if (row == NULL)
+    {
+        ERROR ("mysql plugin: Failed to get innodb statistics: "
+                "`%s' did not return any rows.", query);
+        return (-1);
+    }
+
+    field_num = mysql_num_fields (res);
+    if (field_num < 3)
+    {
+        ERROR ("mysql plugin: Failed to get InnoDB statistics: "
+                "`%s' returned less than 3 columns.", query);
+        return (-1);
+    }
+
+    numlines = split_row(row[2], lines, STATIC_ARRAY_SIZE (lines)); 
+
+    /**
+     * Most of the InnoDB Status parsing was derived from 
+     * ss_get_mysql_stats.php that some with the Percona 
+     * monitoring plugin: 
+     *      http://www.percona.com/doc/percona-monitoring-plugins/
+     */
+    for (i = 0; i < numlines; ++i) {
+       if (strncmp ("Mutex spin waits", lines[i], 
+                        strlen ("Mutex spin waits")) == 0)
+       {
+          numfields = split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
+          gauge_submit ("mysql_mutex", "spin_waits",
+                                atof (fields[3]), db);
+          gauge_submit ("mysql_mutex", "spin_rounds",
+                                atof (fields[5]), db);
+          gauge_submit ("mysql_mutex", "OS_waits",
+                                atof (fields[8]), db);
+
+       }
+       else if (strncmp ("Trx id counter", lines[i], 
+                        strlen ("Trx id counter")) == 0)
+       {
+         numfields = split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
+         txn_cnt = strtol (fields[3], NULL, 16);
+         derive_submit ("innodb_trx", "total_transactions", 
+                                txn_cnt, db);
+       }
+       else if (strncmp ("Purge done for trx", lines[i], 
+                        strlen ("Trx id counter")) == 0)
+       {
+         numfields = split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
+         unpurge_cnt = txn_cnt - strtol (fields[6], NULL, 16);
+         derive_submit ("innodb_trx", "current_transactions", 
+                                unpurge_cnt, db);
+       }
+       else if (strncmp ("History list length", lines[i], 
+                        strlen ("History list length")) == 0)
+       {
+         numfields = split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
+         derive_submit ("innodb_trx", "history_list",
+                                atof (fields[3]), db);
+       }
+       else if (strncmp ("Buffer pool size ", lines[i], 
+                        strlen ("Buffer pool size ")) == 0)
+       {
+         numfields = split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
+         gauge_submit ("innodb_buffer_pool", "pool_size",
+                                atof (fields[3]), db);
+       }
+       else if (strncmp ("Free buffers", lines[i], 
+                        strlen ("Free buffers")) == 0)
+       {
+         numfields = split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
+         gauge_submit ("innodb_buffer_pool", "free_pages",
+                                atof (fields[2]), db);
+       }
+       else if (strncmp ("Database pages", lines[i], 
+                        strlen ("Database pages")) == 0)
+       {
+         numfields = split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
+         gauge_submit ("innodb_buffer_pool", "database_pages",
+                                atof (fields[2]), db);
+       }
+       else if (strncmp ("Modified db pages", lines[i], 
+                        strlen ("Modified db pages")) == 0)
+       {
+         numfields = split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
+         gauge_submit ("innodb_buffer_pool", "modified_db_pages",
+                                atof (fields[3]), db);
+       }
+       else if (strncmp ("Pages read ahead", lines[i], 
+                        strlen ("Pages read ahead")) == 0)
+       {
+         /* do nothing */
+       }
+       else if (strncmp ("Pages read", lines[i], 
+                        strlen ("Pages read")) == 0)
+       {
+         numfields = split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
+         derive_submit ("innodb_buffer_pool_activity", "pages_read",
+                                atof (fields[2]), db);
+         derive_submit ("innodb_buffer_pool_activity", "pages_created",
+                                atof (fields[4]), db);
+         derive_submit ("innodb_buffer_pool_activity", "pages_written",
+                                atof (fields[6]), db);
+       }
+       else if (strstr (lines[i], " OS file reads") != NULL)
+       {
+         numfields = split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
+         derive_submit("innodb_io_activity", "file_reads",
+                                atof (fields[0]), db);
+         derive_submit("innodb_io_activity", "file_writes",
+                                atof (fields[4]), db);
+         derive_submit("innodb_io_activity", "file_syncs",
+                                atof (fields[8]), db);
+       }
+       else if (strstr (lines[i], " log i/o's done, ") != NULL)
+       {
+         numfields = split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
+         derive_submit("innodb_io_activity", "log_writes",
+                                atof (fields[0]), db);
+       }
+    }
+
+    row = mysql_fetch_row (res);
+    if (row != NULL)
+        WARNING ("mysql plugin: `%s' returned more than one row - "
+                "ignoring further results.", query);
+
+    mysql_free_result (res);
+
+    return (0);
+} /* mysql_innodb_stats */
+
 static int mysql_read (user_data_t *ud)
 {
 	mysql_database_t *db;
@@ -702,6 +894,9 @@ static int mysql_read (user_data_t *ud)
 
 	if ((db->slave_stats) || (db->slave_notif))
 		mysql_read_slave_stats (db, con);
+
+    if (db->innodb_stats)
+        mysql_innodb_stats (db, con);
 
 	return (0);
 } /* int mysql_read */

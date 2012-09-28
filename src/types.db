@@ -77,6 +77,10 @@ if_octets		rx:DERIVE:0:U, tx:DERIVE:0:U
 if_packets		rx:DERIVE:0:U, tx:DERIVE:0:U
 if_rx_errors		value:DERIVE:0:U
 if_tx_errors		value:DERIVE:0:U
+innodb_trx      value:DERIVE:0:U
+innodb_buffer_pool      value:GAUGE:0:U
+innodb_buffer_pool_activity value:DERIVE:0:U
+innodb_io_activity value:DERIVE:0:U
 invocations		value:DERIVE:0:U
 io_octets		rx:DERIVE:0:U, tx:DERIVE:0:U
 io_packets		rx:DERIVE:0:U, tx:DERIVE:0:U
@@ -99,6 +103,7 @@ mysql_commands		value:DERIVE:0:U
 mysql_handler		value:DERIVE:0:U
 mysql_locks		value:DERIVE:0:U
 mysql_log_position	value:DERIVE:0:U
+mysql_mutex         value:GAUGE:0:U
 mysql_octets		rx:DERIVE:0:U, tx:DERIVE:0:U
 nfs_procedure		value:DERIVE:0:U
 nginx_connections	value:GAUGE:0:U
