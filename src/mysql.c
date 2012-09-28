@@ -26,6 +26,7 @@
      *   Sebastian tokkee Harl <sh at tokkee.org>
      *   Rodolphe Quiédeville <rquiedeville at bearstech.com>
      *   Shawn Sterling <shawn at systemtemplar.org>
+     *   Gregory Haase <greg at taximagic.com>
  **/
 
 #include "collectd.h"

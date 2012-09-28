@@ -85,6 +85,9 @@ Flavio Stanchina <flavio at stanchina.net>
 Franck Lombardi
  - UNIX socket code for the memcached plugin.
 
+Gregory Haase <greg at taximagic.com>
+ - extended mysql plugin
+
 Jason Pepas <cell at ices.utexas.edu>
  - nfs plugin.
 
