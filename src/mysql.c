@@ -656,7 +656,7 @@ static int mysql_innodb_engine_stats (mysql_database_t *db, MYSQL *con)
     MYSQL_ROW  row;
 
     char *query, *lines[150], *fields[12];
-    int   field_num, numlines, numfields, i, txn_cnt = 0, unpurge_cnt = 0;
+    int   field_num, numlines, i, txn_cnt = 0, unpurge_cnt = 0;
 
     query = "SHOW /*!50000 ENGINE*/ INNODB STATUS";
 
@@ -692,19 +692,53 @@ static int mysql_innodb_engine_stats (mysql_database_t *db, MYSQL *con)
        if (strncmp ("Mutex spin waits", lines[i], 
                         strlen ("Mutex spin waits")) == 0)
        {
-          numfields = split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
-          gauge_submit ("mysql_mutex", "spin_waits",
+          split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
+          counter_submit ("mysql_semaphores", "mutex_spin_waits",
                                 atof (fields[3]), db);
-          gauge_submit ("mysql_mutex", "spin_rounds",
+          counter_submit ("mysql_semaphores", "mutex_spin_rounds",
                                 atof (fields[5]), db);
-          gauge_submit ("mysql_mutex", "OS_waits",
+          counter_submit ("mysql_semaphores", "mutex_OS_waits",
                                 atof (fields[8]), db);
 
+       }
+       else if ((strncmp ("RW-shared spins",lines[i],
+                        strlen ("RW-shared spins")) == 0)
+               && (strstr (lines[i], ";") ) )
+       {
+          /* pre 5.5.17 SHOW ENGINE INNODB STATUS syntax */
+          split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
+          counter_submit ("mysql_semaphores", "rw_shared_spin_waits",
+                                atof (fields[2]), db);
+          counter_submit ("mysql_semaphores", "rw_shared_os_waits",
+                                atof (fields[5]), db);
+          counter_submit ("mysql_semaphores", "rw_excl_spin_waits",
+                                atof (fields[8]), db);
+          counter_submit ("mysql_semaphores", "rw_excl_os_waits",
+                                atof (fields[11]), db);
+       }
+       else if ((strncmp ("RW-shared spins", lines[i],
+                        strlen ("RW-shared spins")) == 0)
+               && !(strstr (lines[i], "RW-excl spins")) )
+       {
+          /* post 5.5.17 SHOW ENGINE INNODB STATUS syntax */
+          split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
+          counter_submit ("mysql_semaphores", "rw_shared_spin_waits",
+                                atof (fields[2]), db);
+          counter_submit ("mysql_semaphores", "rw_shared_os_waits",
+                                atof (fields[7]), db);
+       } 
+       else if (strncmp ("RW-excl spins", lines[i],
+                        strlen ("RW-shared spins")) == 0)
+       {
+          counter_submit ("mysql_semaphores", "rw_excl_spin_waits",
+                                atof (fields[2]), db);
+          counter_submit ("mysql_semaphores", "rw_excl_os_waits",
+                                atof (fields[7]), db);
        }
        else if (strncmp ("Trx id counter", lines[i], 
                         strlen ("Trx id counter")) == 0)
        {
-         numfields = split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
+         split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
          txn_cnt = strtol (fields[3], NULL, 16);
          derive_submit ("innodb_trx", "total_transactions", 
                                 txn_cnt, db);
@@ -712,7 +746,7 @@ static int mysql_innodb_engine_stats (mysql_database_t *db, MYSQL *con)
        else if (strncmp ("Purge done for trx", lines[i], 
                         strlen ("Trx id counter")) == 0)
        {
-         numfields = split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
+         split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
          unpurge_cnt = txn_cnt - strtol (fields[6], NULL, 16);
          derive_submit ("innodb_trx", "current_transactions", 
                                 unpurge_cnt, db);
@@ -720,35 +754,35 @@ static int mysql_innodb_engine_stats (mysql_database_t *db, MYSQL *con)
        else if (strncmp ("History list length", lines[i], 
                         strlen ("History list length")) == 0)
        {
-         numfields = split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
+         split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
          derive_submit ("innodb_trx", "history_list",
                                 atof (fields[3]), db);
        }
        else if (strncmp ("Buffer pool size ", lines[i], 
                         strlen ("Buffer pool size ")) == 0)
        {
-         numfields = split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
+         split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
          gauge_submit ("innodb_buffer_pool", "pool_size",
                                 atof (fields[3]), db);
        }
        else if (strncmp ("Free buffers", lines[i], 
                         strlen ("Free buffers")) == 0)
        {
-         numfields = split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
+         split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
          gauge_submit ("innodb_buffer_pool", "free_pages",
                                 atof (fields[2]), db);
        }
        else if (strncmp ("Database pages", lines[i], 
                         strlen ("Database pages")) == 0)
        {
-         numfields = split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
+         split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
          gauge_submit ("innodb_buffer_pool", "database_pages",
                                 atof (fields[2]), db);
        }
        else if (strncmp ("Modified db pages", lines[i], 
                         strlen ("Modified db pages")) == 0)
        {
-         numfields = split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
+         split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
          gauge_submit ("innodb_buffer_pool", "modified_db_pages",
                                 atof (fields[3]), db);
        }
@@ -760,7 +794,7 @@ static int mysql_innodb_engine_stats (mysql_database_t *db, MYSQL *con)
        else if (strncmp ("Pages read", lines[i], 
                         strlen ("Pages read")) == 0)
        {
-         numfields = split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
+         split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
          derive_submit ("innodb_buffer_pool_activity", "pages_read",
                                 atof (fields[2]), db);
          derive_submit ("innodb_buffer_pool_activity", "pages_created",
@@ -770,7 +804,7 @@ static int mysql_innodb_engine_stats (mysql_database_t *db, MYSQL *con)
        }
        else if (strstr (lines[i], " OS file reads") != NULL)
        {
-         numfields = split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
+         split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
          derive_submit("innodb_io_activity", "file_reads",
                                 atof (fields[0]), db);
          derive_submit("innodb_io_activity", "file_writes",
@@ -780,7 +814,7 @@ static int mysql_innodb_engine_stats (mysql_database_t *db, MYSQL *con)
        }
        else if (strstr (lines[i], " log i/o's done, ") != NULL)
        {
-         numfields = split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
+         split_line (lines[i], fields, STATIC_ARRAY_SIZE (fields));
          derive_submit("innodb_io_activity", "log_writes",
                                 atof (fields[0]), db);
        }
