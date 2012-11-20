@@ -59,7 +59,23 @@
 
 #if HAVE_LIBGCRYPT
 # include <pthread.h>
+# if defined __APPLE__
+/* default xcode compiler throws warnings even when deprecated functionality
+ * is not used. -Werror breaks the build because of erroneous warnings.
+ * http://stackoverflow.com/questions/10556299/compiler-warnings-with-libgcrypt-v1-5-0/12830209#12830209
+ */
+#  pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+# endif
+/* FreeBSD's copy of libgcrypt extends the existing GCRYPT_NO_DEPRECATED
+ * to properly hide all deprecated functionality.
+ * http://svnweb.freebsd.org/ports/head/security/libgcrypt/files/patch-src__gcrypt.h.in
+ */
+# define GCRYPT_NO_DEPRECATED
 # include <gcrypt.h>
+# if defined __APPLE__
+/* Re enable deprecation warnings */
+#  pragma GCC diagnostic warning "-Wdeprecated-declarations"
+# endif
 GCRY_THREAD_OPTION_PTHREAD_IMPL;
 #endif
 
@@ -662,7 +678,7 @@ static int write_part_number (char **ret_buffer, int *ret_buffer_len,
 
 	part_header_t pkg_head;
 	uint64_t pkg_value;
-	
+
 	int offset;
 
 	packet_len = sizeof (pkg_head) + sizeof (pkg_value);
@@ -2718,7 +2734,7 @@ static int add_to_buffer (char *buffer, int buffer_size, /* {{{ */
 			return (-1);
 		sstrncpy (vl_def->type_instance, vl->type_instance, sizeof (vl_def->type_instance));
 	}
-	
+
 	if (write_part_values (&buffer, &buffer_size, ds, vl) != 0)
 		return (-1);
 
@@ -3355,9 +3371,17 @@ static int network_init (void)
 	have_init = 1;
 
 #if HAVE_LIBGCRYPT
-	gcry_control (GCRYCTL_SET_THREAD_CBS, &gcry_threads_pthread);
-	gcry_control (GCRYCTL_INIT_SECMEM, 32768, 0);
-	gcry_control (GCRYCTL_INITIALIZATION_FINISHED, 0);
+    /* http://lists.gnupg.org/pipermail/gcrypt-devel/2003-August/000458.html
+     * Because you can't know in a library whether another library has
+     * already initialized the library
+     */
+    if (!gcry_control (GCRYCTL_ANY_INITIALIZATION_P))
+    {
+        gcry_check_version(NULL); /* before calling any other functions */
+        gcry_control (GCRYCTL_SET_THREAD_CBS, &gcry_threads_pthread);
+        gcry_control (GCRYCTL_INIT_SECMEM, 32768, 0);
+        gcry_control (GCRYCTL_INITIALIZATION_FINISHED, 0);
+    }
 #endif
 
 	if (network_config_stats != 0)
@@ -3431,7 +3455,7 @@ static int network_init (void)
 	return (0);
 } /* int network_init */
 
-/* 
+/*
  * The flush option of the network plugin cannot flush individual identifiers.
  * All the values are added to a buffer and sent when the buffer is full, the
  * requested value may or may not be in there, it's not worth finding out. We
